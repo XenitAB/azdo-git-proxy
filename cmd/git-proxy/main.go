@@ -1,34 +1,88 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/go-logr/logr"
+	"github.com/go-logr/zapr"
 	git "github.com/libgit2/git2go/v31"
 	"github.com/nulab/go-git-http-xfer/githttpxfer"
+	flag "github.com/spf13/pflag"
+	"go.uber.org/zap"
 )
 
+var (
+	port     int
+	gitBin   string
+	repoPath string
+)
+
+func init() {
+	flag.IntVar(&port, "port", 8080, "port to bind server to.")
+	flag.StringVar(&gitBin, "git-binary-path", "/usr/bin/git", "path to git binary.")
+	flag.StringVar(&repoPath, "repository-path", "/tmp/repos", "path to store repositories.")
+	flag.Parse()
+}
+
 func main() {
-	repoPath := "/tmp/repos"
-	gitBin := "/usr/bin/git"
+	// Initiate logs
+	var log logr.Logger
+	zapLog, err := zap.NewProduction()
+	if err != nil {
+		panic(fmt.Sprintf("who watches the watchmen (%v)?", err))
+	}
+	log = zapr.NewLogger(zapLog)
+	setupLog := log.WithName("setup")
 
-	// remoteGit := "https://dev.azure.com/simongottschlag/test/_git/test"
+	// Signal handler
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
+	// Setup GitHTTPXfer
+	setupLog.Info("Starting azdo-git-proxy", "gitBin", gitBin, "port", port, "repoPath", repoPath)
 	ghx, err := githttpxfer.New(repoPath, gitBin)
 	if err != nil {
-		log.Fatalf("GitHTTPXfer instance could not be created. %s", err.Error())
-		return
+		setupLog.Error(err, "GitHTTPXfer instance could not be created.")
+		os.Exit(1)
 	}
 
 	handler := Logging(ghx)
 	handler = ProxyMiddleware(handler, repoPath)
+	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: handler}
 
-	if err := http.ListenAndServe(":5050", handler); err != nil {
-		log.Fatal("ListenAndServe: ", err)
+	// Start HTTP server
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			setupLog.Error(err, "Http Server Error")
+		}
+	}()
+	setupLog.Info("Server started")
+
+	// Blocks until singal is sent
+	<-done
+	setupLog.Info("Server stopped")
+
+	// Shutdown http server
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer func() {
+		cancel()
+	}()
+	if err := srv.Shutdown(ctx); err != nil {
+		setupLog.Error(err, "Server shutdown failed")
+		os.Exit(1)
 	}
+
+	setupLog.Info("Server exited properly")
 }
 
 func Logging(next http.Handler) http.Handler {
@@ -48,12 +102,6 @@ func ProxyMiddleware(next http.Handler, repoPath string) http.Handler {
 		azdoRepo := strings.Split(r.URL.Path, "/")[4]
 		repoUri := "https://" + azdoDomain + "/" + azdoOrg + "/" + azdoProj + "/_git/" + azdoRepo
 		localPath := repoPath + "/" + azdoOrg + "/" + azdoProj + "/_git/" + azdoRepo
-		log.Printf("Path: %s", r.URL.Path)
-		log.Printf("Query: %s", r.URL.RawQuery)
-		log.Printf("Organization: %s", azdoOrg)
-		log.Printf("Project: %s", azdoProj)
-		log.Printf("Repository: %s", azdoRepo)
-		log.Printf("repoUri: %s", repoUri)
 		cloneOptions := &git.CloneOptions{
 			Bare:           false,
 			CheckoutBranch: "master",
