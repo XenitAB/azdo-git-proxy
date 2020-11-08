@@ -13,7 +13,7 @@ import (
 
 func main() {
 	repoPath := "/tmp/repos"
-	gitBin := "/usr/local/bin/git"
+	gitBin := "/usr/bin/git"
 
 	// remoteGit := "https://dev.azure.com/simongottschlag/test/_git/test"
 

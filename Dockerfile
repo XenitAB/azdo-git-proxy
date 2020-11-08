@@ -1,31 +1,25 @@
 FROM golang:1.15 as builder
 WORKDIR /workspace
 
-# libgit2 / git2go
+COPY scripts .
+RUN apt-get update && apt-get -y install cmake libssl-dev
+RUN ./install_libgit2.sh
 
-RUN apt-get update && apt-get -q -y install \
-    git openssl apt-transport-https ca-certificates curl g++ gcc libc6-dev make pkg-config \
-    libssl-dev libssh2-1-dev cmake
-
-RUN go get -d github.com/libgit2/git2go && \
-    cd $GOPATH/src/github.com/libgit2/git2go && \
-    git checkout tags/v31.3.0 && \
-    git submodule update --init && \
-    make install-static
-
-# git-proxy
-
-COPY go.mod go.mod
+COPY go.mod go.sum ./
 RUN go mod download
-COPY cmd/ cmd/
-RUN GOOS=linux GOARCH=amd64 GO111MODULE=on go build -tags static -a -o git-proxy cmd/git-proxy/main.go
-RUN mkdir -p /tmp/repos
-ENTRYPOINT ["/workspace/git-proxy"]
+COPY . .
+RUN GOOS=linux GOARCH=amd64 GO111MODULE=on go build -tags static,system_libgit2 -a -o git-proxy cmd/git-proxy/main.go
 
-# runtime
+FROM debian:buster-slim
+WORKDIR /app/
+COPY --from=builder /workspace/git-proxy .
 
-# FROM gcr.io/distroless/static:nonroot as runtime
-# WORKDIR /
-# COPY --from=builder /workspace/git-proxy .
-# USER nonroot:nonroot
-# ENTRYPOINT ["/git-proxy"]
+RUN apt-get update && \
+    apt-get install -y git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -r user && useradd -r -g user user
+
+USER user
+
+ENTRYPOINT ["/app/git-proxy"]

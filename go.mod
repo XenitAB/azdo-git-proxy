@@ -10,4 +10,4 @@ require (
 	golang.org/x/crypto v0.0.0-20201016220609-9e8e0b390897 // indirect
 )
 
-replace github.com/libgit2/git2go/v31 => ../../../../go/src/github.com/libgit2/git2go
+// replace github.com/libgit2/git2go/v31 => ../../../../go/src/github.com/libgit2/git2go
