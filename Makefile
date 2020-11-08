@@ -15,9 +15,9 @@ test: fmt vet
 
 prep-git2go:
 	# NOT TESTED YET
-	go get -d github.com/libgit2/git2go/v31
+	go get -d github.com/libgit2/git2go 
 	GOPATH=$$(go env GOPATH)
-	cd $GOPATH/src/github.com/libgit2/
+	cd $GOPATH/src/github.com/libgit2/git2go
 	git submodule update --init
 	make install-static
 
