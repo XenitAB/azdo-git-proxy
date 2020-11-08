@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -56,8 +55,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	handler := Logging(ghx)
-	handler = ProxyMiddleware(handler, repoPath)
+	handler := ProxyMiddleware(ghx, repoPath)
 	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: handler}
 
 	// Start HTTP server
@@ -85,17 +83,17 @@ func main() {
 	setupLog.Info("Server exited properly")
 }
 
-func Logging(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t1 := time.Now()
-		next.ServeHTTP(w, r)
-		t2 := time.Now()
-		log.Printf("[%s] %q %v\n", r.Method, r.URL.String(), t2.Sub(t1))
-	})
-}
-
 func ProxyMiddleware(next http.Handler, repoPath string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Initiate logs
+	var log logr.Logger
+	zapLog, err := zap.NewProduction()
+	if err != nil {
+		panic(fmt.Sprintf("who watches the watchmen (%v)?", err))
+	}
+	log = zapr.NewLogger(zapLog)
+	proxyLog := log.WithName("proxy")
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		azdoDomain := "dev.azure.com"
 		azdoOrg := strings.Split(r.URL.Path, "/")[1]
 		azdoProj := strings.Split(r.URL.Path, "/")[2]
@@ -110,12 +108,14 @@ func ProxyMiddleware(next http.Handler, repoPath string) http.Handler {
 		if err != nil {
 			err := PullBranch(localPath, "origin", "master", "", "", "TEST-NAME", "test-email@example.com")
 			if err != nil {
-				log.Printf("Error pulling branch: %s", err)
+				proxyLog.Error(err, "Error pulling branch.")
 			}
 
 		}
 		next.ServeHTTP(w, r)
 	})
+
+	return handler
 }
 
 func PullBranch(repoPath string, remoteName string, branchName string, user string, pass string, name string, email string) error {
