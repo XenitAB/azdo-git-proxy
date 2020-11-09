@@ -16,7 +16,7 @@ import (
 	"github.com/go-logr/zapr"
 	"github.com/gorilla/mux"
 	git "github.com/libgit2/git2go/v31"
-	"github.com/nulab/go-git-http-xfer/githttpxfer"
+	"github.com/sosedoff/gitkit"
 	flag "github.com/spf13/pflag"
 	"go.uber.org/zap"
 )
@@ -48,19 +48,26 @@ func main() {
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
 
-	// Setup GitHTTPXfer
-	setupLog.Info("Starting azdo-git-proxy", "gitBin", gitBin, "port", port, "repoPath", repoPath)
-	ghx, err := githttpxfer.New(repoPath, gitBin)
-	if err != nil {
-		setupLog.Error(err, "GitHTTPXfer instance could not be created.")
+	// Setup GitKit
+	gitkit := gitkit.New(gitkit.Config{
+		Dir:        repoPath,
+		GitPath:    gitBin,
+		AutoCreate: true,
+		Auth:       false,
+	})
+
+	if err := gitkit.Setup(); err != nil {
+		setupLog.Error(err, "gitkit instance could not be created.")
 		os.Exit(1)
 	}
-	gitProxy := ProxyMiddleware(ghx, repoPath, log.WithName("proxy"))
 
+	gitProxy := ProxyMiddleware(gitkit, repoPath, log.WithName("proxy"))
 	router := mux.NewRouter()
 	router.HandleFunc("/readyz", readinessHandler(log.WithName("readiness"))).Methods("GET")
 	router.HandleFunc("/healthz", livenessHandler(log.WithName("liveness"))).Methods("GET")
 	router.PathPrefix("/").HandlerFunc(gitProxy)
+
+	setupLog.Info("Starting azdo-git-proxy", "gitBin", gitBin, "port", port, "repoPath", repoPath)
 
 	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: router}
 
@@ -126,6 +133,7 @@ func ProxyMiddleware(next http.Handler, repoPath string, log logr.Logger) func(h
 			err := PullBranch(localPath, "origin", "master", "", "", "TEST-NAME", "test-email@example.com")
 			if err != nil {
 				log.Error(err, "Error pulling branch.")
+				http.NotFound(w, r)
 			}
 
 		}

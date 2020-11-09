@@ -9,6 +9,8 @@ require (
 	github.com/gorilla/mux v1.8.0 // indirect
 	github.com/libgit2/git2go/v31 v31.3.0
 	github.com/nulab/go-git-http-xfer v1.3.2
+	github.com/satori/go.uuid v1.2.0 // indirect
+	github.com/sosedoff/gitkit v0.2.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/stretchr/testify v1.6.1 // indirect
 	go.uber.org/zap v1.16.0 // indirect
