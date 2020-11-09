@@ -14,6 +14,7 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
+	"github.com/gorilla/mux"
 	git "github.com/libgit2/git2go/v31"
 	"github.com/nulab/go-git-http-xfer/githttpxfer"
 	flag "github.com/spf13/pflag"
@@ -54,9 +55,14 @@ func main() {
 		setupLog.Error(err, "GitHTTPXfer instance could not be created.")
 		os.Exit(1)
 	}
+	gitProxy := ProxyMiddleware(ghx, repoPath, log.WithName("proxy"))
 
-	handler := ProxyMiddleware(ghx, repoPath)
-	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: handler}
+	router := mux.NewRouter()
+	router.HandleFunc("/readyz", readinessHandler(log.WithName("readiness"))).Methods("GET")
+	router.HandleFunc("/healthz", livenessHandler(log.WithName("liveness"))).Methods("GET")
+	router.PathPrefix("/").HandlerFunc(gitProxy)
+
+	srv := &http.Server{Addr: ":" + strconv.Itoa(port), Handler: router}
 
 	// Start HTTP server
 	go func() {
@@ -83,17 +89,28 @@ func main() {
 	setupLog.Info("Server exited properly")
 }
 
-func ProxyMiddleware(next http.Handler, repoPath string) http.Handler {
-	// Initiate logs
-	var log logr.Logger
-	zapLog, err := zap.NewProduction()
-	if err != nil {
-		panic(fmt.Sprintf("who watches the watchmen (%v)?", err))
+func readinessHandler(log logr.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("{\"status\": \"ok\"}")); err != nil {
+			log.Error(err, "Could not write response data")
+		}
 	}
-	log = zapr.NewLogger(zapLog)
-	proxyLog := log.WithName("proxy")
+}
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func livenessHandler(log logr.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte("{\"status\": \"ok\"}")); err != nil {
+			log.Error(err, "Could not write response data")
+		}
+	}
+}
+
+func ProxyMiddleware(next http.Handler, repoPath string, log logr.Logger) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
 		azdoDomain := "dev.azure.com"
 		azdoOrg := strings.Split(r.URL.Path, "/")[1]
 		azdoProj := strings.Split(r.URL.Path, "/")[2]
@@ -108,14 +125,12 @@ func ProxyMiddleware(next http.Handler, repoPath string) http.Handler {
 		if err != nil {
 			err := PullBranch(localPath, "origin", "master", "", "", "TEST-NAME", "test-email@example.com")
 			if err != nil {
-				proxyLog.Error(err, "Error pulling branch.")
+				log.Error(err, "Error pulling branch.")
 			}
 
 		}
 		next.ServeHTTP(w, r)
-	})
-
-	return handler
+	}
 }
 
 func PullBranch(repoPath string, remoteName string, branchName string, user string, pass string, name string, email string) error {
