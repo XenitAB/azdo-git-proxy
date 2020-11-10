@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -15,7 +14,11 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/go-logr/zapr"
 	"github.com/gorilla/mux"
-	git "github.com/libgit2/git2go/v31"
+	"github.com/ldez/go-git-cmd-wrapper/v2/clone"
+	"github.com/ldez/go-git-cmd-wrapper/v2/fetch"
+	"github.com/ldez/go-git-cmd-wrapper/v2/git"
+	"github.com/ldez/go-git-cmd-wrapper/v2/reset"
+	"github.com/ldez/go-git-cmd-wrapper/v2/types"
 	"github.com/nulab/go-git-http-xfer/githttpxfer"
 	flag "github.com/spf13/pflag"
 	"go.uber.org/zap"
@@ -117,15 +120,22 @@ func ProxyMiddleware(next http.Handler, repoPath string, log logr.Logger) func(h
 		azdoRepo := strings.Split(r.URL.Path, "/")[4]
 		repoUri := "https://" + azdoDomain + "/" + azdoOrg + "/" + azdoProj + "/_git/" + azdoRepo
 		localPath := repoPath + "/" + azdoOrg + "/" + azdoProj + "/_git/" + azdoRepo
-		cloneOptions := &git.CloneOptions{
-			Bare:           false,
-			CheckoutBranch: "master",
-		}
-		_, err := git.Clone(repoUri, localPath, cloneOptions)
+		_, err := git.Clone(clone.Repository(repoUri), clone.Directory(localPath))
 		if err != nil {
-			err := PullBranch(localPath, "origin", "master", "", "", "TEST-NAME", "test-email@example.com")
+			_, err = git.Reset(GitDir("reset", localPath), reset.Hard)
 			if err != nil {
-				log.Error(err, "Error pulling branch.")
+				log.Error(err, "Error running git reset")
+				http.NotFound(w, r)
+			}
+			_, err = git.Pull(GitDir("pull", localPath))
+			if err != nil {
+				log.Error(err, "Error running git pull")
+				http.NotFound(w, r)
+			}
+			_, err = git.Fetch(GitDir("fetch", localPath), fetch.All, fetch.Tags)
+			if err != nil {
+				log.Error(err, "Error git fetch.")
+				http.NotFound(w, r)
 			}
 
 		}
@@ -133,90 +143,12 @@ func ProxyMiddleware(next http.Handler, repoPath string, log logr.Logger) func(h
 	}
 }
 
-func PullBranch(repoPath string, remoteName string, branchName string, user string, pass string, name string, email string) error {
-
-	repo, err := git.OpenRepository(repoPath)
-	if err != nil {
-		return err
+func GitDir(command string, localPath string) func(g *types.Cmd) {
+	return func(g *types.Cmd) {
+		g.Options = []string{
+			"--git-dir",
+			localPath + "/.git",
+			command,
+		}
 	}
-
-	remote, err := repo.Remotes.Lookup(remoteName)
-	if err != nil {
-		return err
-	}
-
-	err = remote.Fetch([]string{}, &git.FetchOptions{}, "")
-
-	if err != nil {
-		return err
-	}
-
-	remoteBranch, err := repo.References.Lookup("refs/remotes/" + remoteName + "/" + branchName)
-	if err != nil {
-		return err
-	}
-
-	mergeRemoteHead, err := repo.AnnotatedCommitFromRef(remoteBranch)
-	if err != nil {
-		return err
-	}
-
-	mergeHeads := make([]*git.AnnotatedCommit, 1)
-	mergeHeads[0] = mergeRemoteHead
-	if err = repo.Merge(mergeHeads, nil, nil); err != nil {
-		return err
-	}
-
-	// Check if the index has conflicts after the merge
-	idx, err := repo.Index()
-	if err != nil {
-		return err
-	}
-
-	currentBranch, err := repo.Head()
-	if err != nil {
-		return err
-	}
-
-	localCommit, err := repo.LookupCommit(currentBranch.Target())
-	if err != nil {
-		return err
-	}
-
-	// If index has conflicts, read old tree into index and
-	// return an error.
-	if idx.HasConflicts() {
-
-		repo.ResetToCommit(localCommit, git.ResetHard, &git.CheckoutOpts{})
-
-		repo.StateCleanup()
-
-		return errors.New("conflict")
-	}
-
-	// If everything looks fine, create a commit with the two parents
-	treeID, err := idx.WriteTree()
-	if err != nil {
-		return err
-	}
-
-	tree, err := repo.LookupTree(treeID)
-	if err != nil {
-		return err
-	}
-
-	remoteCommit, err := repo.LookupCommit(remoteBranch.Target())
-	if err != nil {
-		return err
-	}
-
-	sig := &git.Signature{Name: name, Email: email, When: time.Now()}
-	_, err = repo.CreateCommit("HEAD", sig, sig, "merged", tree, localCommit, remoteCommit)
-	if err != nil {
-		return err
-	}
-
-	repo.StateCleanup()
-
-	return nil
 }

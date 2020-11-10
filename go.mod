@@ -7,6 +7,8 @@ require (
 	github.com/go-logr/logr v0.3.0 // indirect
 	github.com/go-logr/zapr v0.3.0 // indirect
 	github.com/gorilla/mux v1.8.0 // indirect
+	github.com/ldez/go-git-cmd-wrapper v1.3.0 // indirect
+	github.com/ldez/go-git-cmd-wrapper/v2 v2.0.0 // indirect
 	github.com/libgit2/git2go/v31 v31.3.0
 	github.com/nulab/go-git-http-xfer v1.3.2
 	github.com/spf13/pflag v1.0.5 // indirect

@@ -22,7 +22,7 @@ prep-git2go:
 	make install-static
 
 build:
-	go build -tags static -a -o bin/git-proxy cmd/git-proxy/main.go
+	go build -a -o bin/git-proxy cmd/git-proxy/main.go
 	#go build -a -o bin/go-git-client cmd/go-git-client/main.go
 
 docker-build:
